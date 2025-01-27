@@ -1,0 +1,9 @@
+1.优先级问题：移植的时候，需保证app_kernel_uart_callback所在的串口中断优先级可以被freertos管理到。因为移植的时候用到的app_kernel_uart_callback函数需要放到串口的中断函数中，并且他用到了freertos的api，所以需保证对应的串口中断优先级在freertos的可管理范围内：即优先级的数值要大于等于宏定义：configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY
+
+2.freertos的可管理内存推荐20000bytes以上，切记：使用cubumx生成的初始工程默认是3072bytes，这个是一定不够的，app_kernel绝对跑不起来，所以这个参数必须手动设置
+
+3.生成工程时，固件版本不要用最新的，用1.8.5版本的，否则编译报错找不到CMSIS头文件；要设置Generate perrpheral initialzation as a pair of  '.c/.h' files per peripheral
+
+4.串口重定向，然后通过HAL_UART_Receive_IT(&huart1, u1RxData, 1);在main函数中开启串口中断，最后编写中断接收函数即可
+
+5.下载程序后没有现象的，记得复位，或者勾选reset and run选项
