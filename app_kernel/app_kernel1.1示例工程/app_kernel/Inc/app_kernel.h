@@ -37,6 +37,8 @@ void app_kernel_uart_callback(uint8_t recByte);
 #define  MAX_NAME                  30            /*定义ak对象名字的最长长度*/
 #define  SIGNAL_PARAM_MAX_SIZE     20            /*定义time，signal等内核对象param指针可指向的最大内存(单位：字节)*/
 #define  MAX_TIME_CNT              15            /*定义系统中允许同时存在的time链表节点个数*/          
+#define  MAX_SIGNAL_THREAD          3            /*定义系统中允许同时处理信号的槽函数的线程个数(最大32)*/
+#define  SIGNAL_THREAD_STACK      256            /*定义信号的槽函数处理线程的任务栈大小*/
 
 /*app_kernel内核日志打印函数，用法同printf*/
 #define APP_KERNEL_LOG(format, ...)     {vTaskSuspendAll();\

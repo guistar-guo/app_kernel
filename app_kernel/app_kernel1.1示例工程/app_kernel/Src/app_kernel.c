@@ -1,21 +1,7 @@
 /**
   ******************************************************************************
   * @file           : app_kernel.c
-  * @brief          : 基于freertos开发的模块，笔者将其起名为应用内核，主要功能是
-  *                   提供一些常用的服务接口，如：通过串口助手调用用户自定义的一
-  *                   函数甚至通过串口助手给这个函数传递参数;再如：在单片机开发中
-  *                   经常会有这样的需求，用户想在当前时刻之后的一段时间后调用某
-  *                   个函数，一般的思维，怎么写？可以配置一个定时中断，读取当前
-  *                   时刻的时间戳，然后计算出调用用户函数的时间戳，然后在定时中
-  *                   断中一直判断时间戳来决定是否调用用户的函数，这样需要多写很
-  *                   多代码，而通过本模块只需要调用app_kernel_call_after_times
-  *                   即可实现上述需求。这就引出了本模块目前最主要的两个功能：
-  *                   call服务与time服务。除此之外，本模块还提供其他一些服务，例
-  *                   如：提供系统时间戳app_kernel_systick，提供系统心跳灯（需要
-  *                   移植的时候配置好led灯）。除了这些，本模块还支持有能力的用户
-  *                   二次开发，提供了app_kernel_send_command命令，这是笔者专门给
-  *                   有能力二次开发的用户提供的访问应用内核的接口，不过二次开发
-  *                   对用户的C语言以及freertos系统的掌握程度有一定要求
+  * @brief          : 
   ******************************************************************************
   * @attention 移植好之后（如何移植下文说明），调用app_kernel_Initialize即可开启
   * 应用内核的全部功能，此时在移植的串口上可以查看内核的打印信息，注意如果有提示
@@ -38,23 +24,7 @@
   * 5.可以指定系统可编程led灯，通过APP_KERNEL_LED_ON和APP_KERNEL_LED_OFF指定
   *  这个led灯通过app_kernel_send_command函数来控制，具体方法见其注释
   *
-  * 6.支持信号同步机制，功能和call服务类似，不过不支持串口终端调用（call服务的核心业务）
-  *   但是信号同步机制比call服务更灵活，可以在中断中通知内核调用某个任务上下文的
-  *   回调函数；比time更安全，因为虽然time的回调函数也是任务上下文，但是过度延时的
-  *   话会影响其他的time服务的调用，因为这些回调函数都是在软件定时器中调用的。而signal
-  *   的每一个服务都是独立的一个任务，会单独分配内存空间，不同的服务之间完全独立，功能非
-  *   常强大，是用户同步任务与任务，中断与任务的强大利器！笔者将此服务命名为signal，也
-  *   是为了致敬linux系统的信号机制！
-  *
-  *   注意：考虑到signal服务可能会被用户频繁调用，在这种情况下，旧版本的signal服务
-  *   有可能因为频繁的申请释放内存而导致系统崩溃，因为旧版本的signal服务每次调用发送
-  *   信号请求都会产生至少一次内存申请和释放来创建新的任务，这是非常不合理的，最初我
-  *   这么设计是为了使signal服务的每次调用不会影响其他的signal的回调任务，但是这么做
-  *   导致的上述代价太大了无法接受，因此新版本的signal放弃了上述特性，实际上，linux系
-  *   统的信号机制貌似也没有采用上述做法，可能linux开发者也注意到了频繁申请释放内存导
-  *   致的问题。现在新版本的signal服务，经过实测可以非常频繁的调用而不会导致系统崩溃！
-  *   代价是放弃了每次调用信号发送函数都创建新任务来执行回调函数这个特性，而是只创建
-  *   一个任务来处理各个信号的回调函数。
+  * 6.支持“信号与槽”的强大机制（“信号与槽”伟大无需多言）
   *
   * 7.总结一下app_kernel目前支持的几大业务：call服务，使用户很轻松的在串口助手中调用
   *   某个回调函数；time服务，使用户延迟调用某个函数，可以和call配合，实现在串口助手
@@ -80,29 +50,25 @@
 #include "app_kernel.h"
 
 volatile uint32_t app_kernel_systick = 0;
-static QueueHandle_t app_kernel_queue =NULL;
 static QueueHandle_t user_cmd_queue =NULL;
-static QueueHandle_t sigal1_queue =NULL;
-static QueueHandle_t sigal2_queue =NULL;
-static QueueHandle_t sigal3_queue =NULL;
-static void app_kernel_receive_command(void);
 static void app_kernel_dispose_user_cmd(void);
 static void app_kernel_dispose_sigal(void* param);
 static void user_all_cmd_help(void);
-static void signal_thread_handle(EventBits_t bit, QueueHandle_t queue);
-static TaskHandle_t app_kernel_receive_command_Task_Handle = NULL;
-static TaskHandle_t app_kernel_dispos_signal_Task1_Handle = NULL;
-static TaskHandle_t app_kernel_dispos_signal_Task2_Handle = NULL;
-static TaskHandle_t app_kernel_dispos_signal_Task3_Handle = NULL;
 static TaskHandle_t user_cmd_queue_Handle = NULL;
 static char user_uart_buf[USER_CMD_SIZE];
 static uint8_t user_uart_buf_cnt = 0;
 volatile static EventGroupHandle_t isSignalThreadBusy;
+static TimerHandle_t app_kernel_systimer_handle =NULL;
+static void app_kernel_systimer_callback(void* parameter);
+
 typedef struct{
 	QueueHandle_t signal_queue;
 	EventBits_t   EvenBit;
-}signal_thread_param;
-static signal_thread_param signal1Param, signal2Param, signal3Param;
+	TaskHandle_t  thread_handle;
+	char name[20];
+	uint8_t waitingToDisposeNum;
+}signal_emit_param;
+signal_emit_param sep[MAX_SIGNAL_THREAD];
 
 typedef struct timers{
 	char Name[MAX_NAME];
@@ -129,6 +95,7 @@ typedef struct{
 	axPFCItem head;
 	uint16_t itemNum;
 }app_kernelPFC_l, *PFC_l;
+PFC_l aPendFunctionList=NULL;
 
 static PFC_l app_kernel_PFClist_init(void){
 	char head_name[] = "head";
@@ -209,11 +176,6 @@ static void showPFCList(PFC_l PFC_LIST){
 	}
 }
 
-static TimerHandle_t app_kernel_systimer_handle =NULL;   /* 软件定时器句柄 */
-static void app_kernel_systimer_callback(void* parameter);
-
-PFC_l aPendFunctionList=NULL;
-
 /**************************************************************************
 函数功能：注册串口终端的call命令的回调函数，注册之后，在串口助手中通过
           call name的形式来调用目标回调函数。
@@ -227,7 +189,9 @@ void app_kernel_regist_user_call_function(const char* name, kernelFunction_t cal
   while(p->next != NULL && strcmp(p->Name, name)){
 		p = p->next;
 	}
-	char* p_Name = p->Name;//为了提前唤醒调度器
+	
+	/*为了提前唤醒调度器，空间换时间*/
+	char* p_Name = p->Name;
 	if( xTaskResumeAll() == pdFALSE ){ 
     portYIELD_WITHIN_API();
 	}
@@ -253,7 +217,9 @@ void app_kernel_call_user_func(const char*name,\
 	vTaskSuspendAll(); 
 	PFC_t p = &aPendFunctionList->head;
 	while(p->next!=NULL && strcmp(name, p->Name)) p = p->next;
-	char* p_name = p->Name;//为了提前开启调度器，空间换时间
+		
+	/*为了提前开启调度器，空间换时间*/
+	char* p_name = p->Name;
 	if( xTaskResumeAll() == pdFALSE ){ 
       portYIELD_WITHIN_API();
 	}
@@ -461,8 +427,8 @@ void app_kernel_timer_daemon(void){
 返回  值：无
 **************************************************************************/
 void app_kernel_Initialize(void){
-	//下面是rtos内核对象的创建，rtos内核对象一定要定义在创建任务之前，否则很容易造成系统崩溃
-	//（造成系统崩溃的原因：互斥锁对象为NULL的时候，任务试图上锁操作）
+	/*下面是rtos内核对象的创建，rtos内核对象一定要定义在创建任务之前，否则很容易造成系统崩溃
+	（造成系统崩溃的原因：互斥锁对象为NULL的时候，任务试图上锁操作）*/
 	BaseType_t xReturn = pdPASS;
 	taskENTER_CRITICAL();//进入临界区
 	
@@ -470,28 +436,10 @@ void app_kernel_Initialize(void){
 		timeNodeTable[i].isBusy = 0;
 		timeNodeTable[i].param = pvPortMalloc(SIGNAL_PARAM_MAX_SIZE);
 	}
-		
 	
-  app_kernel_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,
-                            (UBaseType_t ) QUEUE_SIZE);
 	user_cmd_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,
                             (UBaseType_t ) USER_CMD_SIZE);
-	
-	sigal1_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,
-                            (UBaseType_t ) sizeof(app_kernel_signal));
-	sigal2_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,
-                            (UBaseType_t ) sizeof(app_kernel_signal));
-	sigal3_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,
-                            (UBaseType_t ) sizeof(app_kernel_signal));
-	signal1Param.signal_queue = sigal1_queue;
-	signal2Param.signal_queue = sigal2_queue;
-	signal3Param.signal_queue = sigal3_queue;
-	
 	isSignalThreadBusy = xEventGroupCreate();
-	if(NULL == app_kernel_queue){
-		APP_KERNEL_LOG("app_kernel: 创建消息队列失败!\r\n");
-		while(1){}
-	}
     
 	
 	aPendFunctionList = app_kernel_PFClist_init(); //call服务初始化
@@ -509,54 +457,26 @@ void app_kernel_Initialize(void){
 	else{
 		xTimerStart(app_kernel_systimer_handle,0);	//开启周期定时器
 	}
-	
-	//下面是任务创建过程
-	xReturn = xTaskCreate((TaskFunction_t )app_kernel_receive_command,
-                        (const char*    )"app_kernel_receive_command",
-                         (uint16_t       )128,
-                        (void*          )NULL,
-                        (UBaseType_t    )24,
-                        (TaskHandle_t*  )&app_kernel_receive_command_Task_Handle);
-  if(pdPASS != xReturn){
-     APP_KERNEL_LOG("app_kernel: 创建app_kernel_receive_command任务失败!\r\n");
-		 while(1){}
-	}
    
-	 signal1Param.EvenBit = 0x01;
-	 xReturn = xTaskCreate((TaskFunction_t )app_kernel_dispose_sigal,
-                        (const char*    )"app_kernel_dispose_sigal1",
-                        (uint16_t       )128,
-                        (void*          )&signal1Param,
+	 char temp[20];
+	 for(int i = 0; i<MAX_SIGNAL_THREAD; i++){
+		 sep[i].waitingToDisposeNum = 0;
+		 sprintf(temp, "signal_thread%c", (char)(i+'0'));
+     memcpy(sep[i].name, temp, 20);
+		 sep[i].EvenBit = 0x01<<i;
+		 sep[i].signal_queue = xQueueCreate((UBaseType_t ) QUEUE_LEN,\
+		     (UBaseType_t ) sizeof(app_kernel_signal));
+	   xReturn = xTaskCreate((TaskFunction_t )app_kernel_dispose_sigal,
+                        (const char*    )sep[i].name,
+                        (uint16_t       )SIGNAL_THREAD_STACK,
+                        (void*          )&sep[i],
                         (UBaseType_t    )24,
-                        (TaskHandle_t*  )&app_kernel_dispos_signal_Task1_Handle);
-    if(pdPASS != xReturn){
-			APP_KERNEL_LOG("app_kernel: 创建app_kernel_dispos_signal_Task1_Handle任务失败!\r\n");
-			while(1){}
-		}
-		
-	 signal2Param.EvenBit = 0x02;
-	 xReturn = xTaskCreate((TaskFunction_t )app_kernel_dispose_sigal,
-                        (const char*    )"app_kernel_dispose_sigal2",
-                        (uint16_t       )128,
-                        (void*          )&signal2Param,
-                        (UBaseType_t    )24,
-                        (TaskHandle_t*  )&app_kernel_dispos_signal_Task2_Handle);
-    if(pdPASS != xReturn){
-			APP_KERNEL_LOG("app_kernel: 创建app_kernel_dispos_signal_Task2_Handle任务失败!\r\n");
-			while(1){}
-		}
-		
-		signal3Param.EvenBit = 0x04;
-	  xReturn = xTaskCreate((TaskFunction_t )app_kernel_dispose_sigal,
-                        (const char*    )"app_kernel_dispose_sigal3",
-                        (uint16_t       )128,
-                        (void*          )&signal3Param,
-                        (UBaseType_t    )24,
-                        (TaskHandle_t*  )&app_kernel_dispos_signal_Task3_Handle);
-    if(pdPASS != xReturn){
-			APP_KERNEL_LOG("app_kernel: 创建app_kernel_dispos_signal_Task3_Handle任务失败!\r\n");
-			while(1){}
-		}
+                        (TaskHandle_t*  )&sep[i].thread_handle);
+     if(pdPASS != xReturn){
+			  APP_KERNEL_LOG("app_kernel: 创建%s任务失败!\r\n", sep[i].name);
+        while(1){}
+		 }
+	 }
 		
 		xReturn = xTaskCreate((TaskFunction_t )app_kernel_dispose_user_cmd,
                         (const char*    )"user_cmd_to_kernel",
@@ -569,24 +489,17 @@ void app_kernel_Initialize(void){
 			while(1){}
 		}
 	taskEXIT_CRITICAL();//退出临界区
-}
-
-static void app_kernel_receive_command(void){
 	APP_KERNEL_LOG(" \r\n");
 	APP_KERNEL_LOG(" \r\n");
-
-	APP_KERNEL_LOG("\\|/   \r\n");
-	APP_KERNEL_LOG(" |   应用内核开始运行...\r\n");
-	APP_KERNEL_LOG("/|\\   \r\n");
-	APP_KERNEL_LOG("***************************************************************\r\n");
-	APP_KERNEL_LOG("欢迎使用app_kernel，本模块建议将串口助手设置为全屏使用效果更佳\r\n");
-	APP_KERNEL_LOG("***************************************************************\r\n");
+	APP_KERNEL_LOG("      \\|/   \r\n");
+	APP_KERNEL_LOG("      -AK-    应用内核：开始运行...\r\n");
+	APP_KERNEL_LOG("      /|\\   \r\n");
+	APP_KERNEL_LOG("************************************************************************\r\n");
+	APP_KERNEL_LOG("欢迎使用##《app_kernel》##，本模块建议将串口助手设置为全屏使用效果更佳\r\n");
+	APP_KERNEL_LOG("************************************************************************\r\n");
 	APP_KERNEL_LOG("输入每一个命令之后，都必须再追加一个回车建（直接键盘上敲回车）\r\n\r\n");
 	APP_KERNEL_LOG("输入help命令可以查看帮助信息\r\n");
 	user_all_cmd_help();
-  while (1){
-    vTaskDelay(1);		
-  }
 }
 
 /**************************************************************************
@@ -620,7 +533,7 @@ static void user_all_cmd_help(void){
 	APP_KERNEL_LOG("| time:              |time服务其实就是app_kernel_call_after_times，请阅读其注释了解  |\r\n");
   APP_KERNEL_LOG("| signal and slot:   |了解详情，请输入'help signal'                                  |\r\n");
 	APP_KERNEL_LOG("**************************************************************************************\r\n");
-	APP_KERNEL_LOG("每个命令的详细参数解释可通过“help + 空格 + 命令名字”的形式查看，如: help signal\r\n");
+	APP_KERNEL_LOG("每个命令的详细参数解释可通过“help + 空格 + 命令名字”的形式查看，如: help signal(记得加回车！)\r\n");
 	APP_KERNEL_LOG("\r\n另外，还有三个示例程序：app_kernel_demo1，app_kernel_demo2，app_kernel_demo3\r\n\
 app_kernel_demo1演示了call服务和time服务的使用；app_kernel_demo2演示了信号与槽的使用\r\n\
 ；app_kernel_demo3演示了app_kernel提供的非阻塞延时函数如何应用在状态机编程上，提供了一个状态机示例程序\r\n");
@@ -665,9 +578,21 @@ static void user_cmd_help(char* user_command){
 }
 
 static void app_kernel_dispose_sigal(void* param){
+	app_kernel_signal signal;
+	signal_emit_param* sepR = (signal_emit_param* )param;
 	while(1){
-		signal_thread_handle(((signal_thread_param*)param)->EvenBit,\
-      	((signal_thread_param*)param)->signal_queue);
+	  EventBits_t theSetBits = xEventGroupWaitBits(isSignalThreadBusy,\
+    sepR->EvenBit, pdFALSE, pdTRUE, 0);
+	  if(theSetBits & sepR->EvenBit){
+		  while(xQueueReceive( sepR->signal_queue, &signal, 0)){
+				signal.slot(signal.param, signal.argc);
+				vTaskSuspendAll();
+				sepR->waitingToDisposeNum--;
+				if( xTaskResumeAll() == pdFALSE )
+					 portYIELD_WITHIN_API();
+		  }
+		  xEventGroupClearBits(isSignalThreadBusy, sepR->EvenBit);
+	  }
 		vTaskDelay(1);
 	}
 }
@@ -850,18 +775,6 @@ int app_kernel_non_blocking_delay(ak_nonBlockDelay_t* akDelay){
 	return app_kernel_systick >= akDelay->endTime ? 1 : 0;
 }
 
-static void signal_thread_handle(EventBits_t bit, QueueHandle_t queue){
-	app_kernel_signal signal;
-	EventBits_t theSetBits = xEventGroupWaitBits(isSignalThreadBusy, bit, pdFALSE, pdTRUE, 0);
-	if(theSetBits & bit){
-		while(xQueueReceive( queue, &signal, 0)){
-			signal.slot(signal.param, signal.argc);
-			vTaskDelay(1);
-		}
-		xEventGroupClearBits(isSignalThreadBusy, bit);
-	}
-}
-
 /**************************************************************************
 函数功能：注册一个信号        
 入口参数：无
@@ -910,27 +823,30 @@ void connect(signal_t signal, slot_t slot){
 void emit(signal_t signal, void* param, uint32_t argc){
 	BaseType_t xReturn = pdPASS;
 	if(signal == NULL || signal->slot == NULL) return;
-	EventBits_t bit = 0x01;
+	UBaseType_t minNum = QUEUE_LEN+1;
+	vTaskSuspendAll();
+	
+	/*死亡回放(开发过程中遇到的一个bug)：曾经(2025/1/27)因为初
+	  始化为NULL，导致后续访问空指针致使系统卡死*/
+	signal_emit_param* sepT = &sep[0];
 	if(param != NULL){
 		memcpy(signal->param, param, argc);
 	}
 	signal->argc = argc;
-	QueueHandle_t queueToSend = sigal1_queue;
-	UBaseType_t minNum = uxQueueMessagesWaiting(sigal1_queue);
-	if(minNum > uxQueueMessagesWaiting(sigal2_queue)){
-		bit = 0x02;
-		queueToSend = sigal2_queue;
-		minNum = uxQueueMessagesWaiting(sigal2_queue);
+	for(int i = 0 ;i<MAX_SIGNAL_THREAD; i++){
+		if(minNum > sep[i].waitingToDisposeNum){
+			sepT = &sep[i];
+			minNum = sepT->waitingToDisposeNum;
+		}
 	}
-	if(minNum > uxQueueMessagesWaiting(sigal3_queue)){
-		bit = 0x04;
-		queueToSend = sigal3_queue;
-		minNum = uxQueueMessagesWaiting(sigal3_queue);
-	}
-	xReturn = xQueueSend(queueToSend, signal, 0);
+	sepT->waitingToDisposeNum = (sepT->waitingToDisposeNum + 1) > QUEUE_LEN ?\
+                           	QUEUE_LEN : (sepT->waitingToDisposeNum + 1);
+	if( xTaskResumeAll() == pdFALSE )
+     portYIELD_WITHIN_API();
+	xReturn = xQueueSend(sepT->signal_queue, signal, 0);
 	if(xReturn == errQUEUE_FULL)
 		APP_KERNEL_LOG("app_kernel:警告：信号发送频率过高，可能丢失部分信号！\r\n");
-	xEventGroupSetBits(isSignalThreadBusy, bit);
+	xEventGroupSetBits(isSignalThreadBusy, sepT->EvenBit);
 }
 
 /**************************************************************************
@@ -941,49 +857,58 @@ void emit(signal_t signal, void* param, uint32_t argc){
 void emit_FromISR(signal_t signal, void* param, uint32_t argc){
 	BaseType_t pxHigherPriorityTaskWoken;
 	if(signal == NULL || signal->slot == NULL) return;
-	EventBits_t bit = 0x01;
+	UBaseType_t minNum = QUEUE_LEN+1;	
+	signal_emit_param* sepT = &sep[0];
 	if(param != NULL){
 		memcpy(signal->param, param, argc);
 	}
 	signal->argc = argc;
-	QueueHandle_t queueToSend = sigal1_queue;
-	UBaseType_t minNum = uxQueueMessagesWaitingFromISR(sigal1_queue);
-	if(minNum > uxQueueMessagesWaitingFromISR(sigal2_queue)){
-		bit = 0x02;
-		queueToSend = sigal2_queue;
-		minNum = uxQueueMessagesWaitingFromISR(sigal2_queue);
+	for(int i = 0 ;i<MAX_SIGNAL_THREAD; i++){
+		if(minNum > sep[i].waitingToDisposeNum){
+			sepT = &sep[i];
+			minNum = sepT->waitingToDisposeNum;
+		}
 	}
-	if(minNum > uxQueueMessagesWaitingFromISR(sigal3_queue)){
-		bit = 0x04;
-		queueToSend = sigal3_queue;
-		minNum = uxQueueMessagesWaitingFromISR(sigal3_queue);
-	}
-	xQueueSendFromISR(queueToSend, signal, &pxHigherPriorityTaskWoken);
+	sepT->waitingToDisposeNum = (sepT->waitingToDisposeNum + 1) > QUEUE_LEN ?\
+                           	QUEUE_LEN : (sepT->waitingToDisposeNum + 1);
+	xQueueSendFromISR(sepT->signal_queue, signal, 0);
 	portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
-	xEventGroupSetBitsFromISR(isSignalThreadBusy, bit, &pxHigherPriorityTaskWoken);
+	xEventGroupSetBitsFromISR(isSignalThreadBusy, sepT->EvenBit, &pxHigherPriorityTaskWoken);
 	portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
 }
 
+/**************************************************************************
+函数功能：删除系统中的信号，这个函数基本用不到！因为只要你注册信号，肯定
+          是想用它的，用完了之后，除非保证之后永远不会再用了，那样的话，
+          调用此函数删除这个信号，否则永远不要调用这个函数，因为你把信号
+          删除了，后续一不小心再调用发送信号函数发送这个信号，那系统立刻
+          崩溃！（非法访问）
+入口参数：signal_t  指定要从系统中删除的信号
+返回  值：无
+**************************************************************************/
 void del_signal(signal_t signalToDel){
 	if(signalToDel == NULL) return ;
 	vPortFree(signalToDel->param);
 	vPortFree(signalToDel);
 }
 
-///////////////////以下是一些示例代码供用户查看内核的一些常用服务用法///////////////////
+/*以下是三个示例代码，它们依赖系统的“信号与槽”与call机制相配合，达到
+  可以在串口终端输入指令来调用的效果，如：输入app_kernel_demo1（加回车
+  ）即可调用示例代码1，看懂示例代码就可以直接上手运用app_kernel到自己
+  的项目中了*/
 
 /**************************************************************************
 函数功能：call和time示例
 入口参数：略
 返回  值：无
 **************************************************************************/
-//time命令回调函数
+/*time命令回调函数*/
 void time_testFunction(void* param,uint32_t argc){
 	APP_KERNEL_LOG("%s\r\n", (char*)param);
 	vTaskDelay(200);
 }
 
-//call命令回调函数
+/*call命令回调函数*/
 void call_testFunction(char*param[],uint32_t argc){
 	APP_KERNEL_LOG("Hello world!\r\n");
 	for(int i = 0; i<argc; i++){
@@ -996,8 +921,8 @@ void app_kernel_demo1(void* param, uint32_t argc){
 	APP_KERNEL_LOG("\r\napp_kernal：run app_kernel_demo1...\r\n");
 	APP_KERNEL_LOG("app_kernal：正在运行call和time服务示例程序...\r\n");
 	
-	//以下是time服务的应用场景，分别在500，1000，1500各系统节拍之后调用time_testFunction
-  //函数打印不同的参数
+	/*以下是time服务的应用场景，分别在500，1000，1500各系统节拍之后调用time_testFunction
+    函数打印不同的参数*/
 	char time1_param[] = "time1 test";
 	char time2_param[] = "time2 test";
 	char time3_param[] = "time3 test";
@@ -1006,12 +931,12 @@ void app_kernel_demo1(void* param, uint32_t argc){
 	app_kernel_call_after_times("time_test3", time_testFunction, time3_param, strlen(time3_param)+1, 500);
 	app_kernel_show_times();
 	
-	//注册一个call服务，名字为call_test，在串口终端输入"call call_test"再输
-	//入回车即可调用call_testFunction函数
+	/*注册一个call服务，名字为call_test，在串口终端输入"call call_test"再输
+	  入回车即可调用call_testFunction函数*/
 	app_kernel_regist_user_call_function("call_test", call_testFunction);
   
-	//提示一下：有用户可能有疑问为什么没有提供这种接口：在串口终端调用某个指令，然后
-	//延迟一段时间再执行指令指定的函数，其实这个需求只要结合call服务和time服务即可轻松实现
+	/*提示一下：有用户可能有疑问为什么没有提供这种接口：在串口终端调用某个指令，然后
+	  延迟一段时间再执行指令指定的函数，其实这个需求只要结合call服务和time服务即可轻松实现*/
 }
 
 /**************************************************************************
