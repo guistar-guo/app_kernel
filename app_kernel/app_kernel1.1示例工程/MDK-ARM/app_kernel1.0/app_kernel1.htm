@@ -3,7 +3,7 @@
 <title>Static Call Graph - [app_kernel1.0\app_kernel1.0]</title></head>
 <body><HR>
 <H1>Static Call Graph for image app_kernel1.0\app_kernel1.0</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Mon Jan 27 23:44:39 2025
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Thu Jan 30 23:45:08 2025
 <BR><P>
 <H3>Maximum Stack Usage =        360 bytes + Unknown(Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -1033,7 +1033,7 @@ Global Symbols
 <BR><BR>[Called By]<UL><LI><a href="#[77]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;_scanf_really_real
 </UL>
 
-<P><STRONG><a name="[b2]"></a>app_kernel_Initialize</STRONG> (Thumb, 688 bytes, Stack size 64 bytes, app_kernel.o(i.app_kernel_Initialize))
+<P><STRONG><a name="[b2]"></a>app_kernel_Initialize</STRONG> (Thumb, 692 bytes, Stack size 64 bytes, app_kernel.o(i.app_kernel_Initialize))
 <BR><BR>[Stack]<UL><LI>Max Depth = 216<LI>Call Chain = app_kernel_Initialize &rArr; xTimerGenericCommand &rArr; xQueueGenericSend &rArr; xTaskResumeAll &rArr; xTaskIncrementTick
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;xTaskResumeAll
@@ -1148,7 +1148,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[b2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_kernel_Initialize
 </UL>
 
-<P><STRONG><a name="[e2]"></a>app_kernel_timer_daemon</STRONG> (Thumb, 172 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_timer_daemon))
+<P><STRONG><a name="[e2]"></a>app_kernel_timer_daemon</STRONG> (Thumb, 174 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_timer_daemon))
 <BR><BR>[Stack]<UL><LI>Max Depth = 104<LI>Call Chain = app_kernel_timer_daemon &rArr; app_kernel_time_del &rArr; xTaskResumeAll &rArr; xTaskIncrementTick
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;xTaskResumeAll
@@ -1159,7 +1159,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[51]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_kernel_systimer_callback
 </UL>
 
-<P><STRONG><a name="[a7]"></a>app_kernel_uart_callback</STRONG> (Thumb, 116 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_uart_callback))
+<P><STRONG><a name="[a7]"></a>app_kernel_uart_callback</STRONG> (Thumb, 138 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_uart_callback))
 <BR><BR>[Stack]<UL><LI>Max Depth = 96<LI>Call Chain = app_kernel_uart_callback &rArr; xQueueGenericSendFromISR &rArr; prvCopyDataToQueue &rArr; xTaskPriorityDisinherit
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;xTaskResumeAll
@@ -1184,7 +1184,7 @@ Global Symbols
 <BR><BR>[Called By]<UL><LI><a href="#[4d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;StartDefaultTask
 </UL>
 
-<P><STRONG><a name="[d8]"></a>emit</STRONG> (Thumb, 174 bytes, Stack size 24 bytes, app_kernel.o(i.emit))
+<P><STRONG><a name="[d8]"></a>emit</STRONG> (Thumb, 176 bytes, Stack size 24 bytes, app_kernel.o(i.emit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 136<LI>Call Chain = emit &rArr; xQueueGenericSend &rArr; xTaskResumeAll &rArr; xTaskIncrementTick
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;xTaskResumeAll
@@ -1198,7 +1198,7 @@ Global Symbols
 <LI><a href="#[53]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_kernel_dispose_user_cmd
 </UL>
 
-<P><STRONG><a name="[7d]"></a>emit_FromISR</STRONG> (Thumb, 140 bytes, Stack size 24 bytes, app_kernel.o(i.emit_FromISR))
+<P><STRONG><a name="[7d]"></a>emit_FromISR</STRONG> (Thumb, 142 bytes, Stack size 24 bytes, app_kernel.o(i.emit_FromISR))
 <BR><BR>[Stack]<UL><LI>Max Depth = 120<LI>Call Chain = emit_FromISR &rArr; xEventGroupSetBitsFromISR &rArr; xTimerPendFunctionCallFromISR &rArr; xQueueGenericSendFromISR &rArr; prvCopyDataToQueue &rArr; xTaskPriorityDisinherit
 </UL>
 <BR>[Calls]<UL><LI><a href="#[e8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;xEventGroupSetBitsFromISR
@@ -2187,7 +2187,7 @@ Local Symbols
 <BR>[Called By]<UL><LI><a href="#[e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_kernel_timer_daemon
 </UL>
 
-<P><STRONG><a name="[d1]"></a>app_kernel_time_item_init</STRONG> (Thumb, 108 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_time_item_init))
+<P><STRONG><a name="[d1]"></a>app_kernel_time_item_init</STRONG> (Thumb, 110 bytes, Stack size 24 bytes, app_kernel.o(i.app_kernel_time_item_init))
 <BR><BR>[Stack]<UL><LI>Max Depth = 24<LI>Call Chain = app_kernel_time_item_init
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;strlen
