@@ -107,10 +107,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
 	HAL_UART_Receive_IT(&huart1, u1RxData, 1);
   /* USER CODE END 2 */
-
   /* Init scheduler */
   osKernelInitialize();
-
+  
   /* Call init function for freertos objects (in cmsis_os2.c) */
   MX_FREERTOS_Init();
 

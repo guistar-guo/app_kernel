@@ -70,15 +70,18 @@ typedef struct{
 }ak_nonBlockDelay_t;
 
 /*以下是用户接口函数，转到定义，阅读函数注释即可使用本模块*/
+
+/*"信号与槽"用户API接口*/
 signal_t Signal(void);
 void connect(signal_t signal, slot_t slot);
 void emit(signal_t signal, void* param, uint32_t argc);
 void emit_FromISR(signal_t signal, void* param, uint32_t argc);
 
-/*call服务相关函数*/
+/*call：注册一个call服务，之后可以在串口助手中调用相关
+  指令通知app_kernel在任务上下文调用callbackFunc*/
 void app_kernel_regist_user_call_function(const char* name, kernelFunction_t callbackFunc);
 
-/*time服务相关函数*/
+/*time：指定在callTime个系统节拍之后，调用回调函数EntryFunction（支持传递参数param）*/
 void app_kernel_call_after_times(char* serviceName, \
 	kernelSignalFunc EntryFunction, void*param, uint32_t argc, uint32_t callTime);
 
