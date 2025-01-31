@@ -12,8 +12,8 @@
   * 某某失败的信息，大概率是内存不够了，解决办法查看下文最后（其实就是把configT
   * OTAL_HEAP_SIZE设置大一点而已）
   *
-  * 整个模块的移植查看b站视频介绍
-  *
+  * 整个模块的移植查看《app_kernel简史》中的b站视频介绍
+  * 
   * 1.call服务的使用查看app_kernel_regist_user_call_function的注释即可
   * 
   * 2.time服务其实就是一个函数：app_kernel_call_after_times，阅读注释即可掌握
