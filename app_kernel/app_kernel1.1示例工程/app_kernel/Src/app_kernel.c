@@ -562,20 +562,17 @@ static void app_kernel_dispose_sigal(void* param){
 	app_kernel_signal signal;
 	signal_emit_param* sepR = (signal_emit_param* )param;
 	while(1){
-	  EventBits_t theSetBits = xEventGroupWaitBits(app_kernel.isSignalThreadBusy,\
-    sepR->EvenBit, pdFALSE, pdTRUE, 0);
-	  if(theSetBits & sepR->EvenBit){
-		  while(xQueueReceive( sepR->signal_queue, &signal, 0)){
-				signal.slot(signal.param, signal.argc);
-				vTaskSuspendAll();
-				sepR->waitingToDisposeNum--;
-				if( xTaskResumeAll() == pdFALSE )
-					 portYIELD_WITHIN_API();
-		  }
-		  xEventGroupClearBits(app_kernel.isSignalThreadBusy, sepR->EvenBit);
-	  }
-		vTaskDelay(1);
-	}
+     EventBits_t theSetBits = xEventGroupWaitBits(app_kernel.isSignalThreadBusy,\
+        sepR->EvenBit, pdFALSE, pdTRUE, portMAX_DELAY);
+     if(theSetBits & sepR->EvenBit){
+         while(xQueueReceive( sepR->signal_queue, &signal, 0) != errQUEUE_EMPTY){
+             signal.slot(signal.param, signal.argc);
+             sepR->waitingToDisposeNum = uxQueueMessagesWaiting(sepR->signal_queue);
+         }
+         xEventGroupClearBits(app_kernel.isSignalThreadBusy, sepR->EvenBit);
+     }
+     vTaskDelay(1);
+  }
 }
 
 void app_kernel_timer_daemon(void){
@@ -617,7 +614,12 @@ static void app_kernel_systimer_callback(void* parameter){
 	}
 	
 	/*每隔500个系统节拍，打印一次当亲系统的剩余内存*/
-//	if(app_kernel_systick%500 == 0){
+//	 if(app_kernel.app_kernel_systick%500 == 0){
+//		 for(int i = 0; i<MAX_SIGNAL_THREAD; i++){
+//			 APP_KERNEL_LOG("队列sep[%d].queue剩余空间个数%d\r\n",\
+//			   i, uxQueueSpacesAvailable(sep[0].signal_queue));
+//		 }
+//	 }
 //		size_t remainBytes = xPortGetMinimumEverFreeHeapSize();
 //		APP_KERNEL_LOG("app_kernel:系统剩余内存:%d bytes\r\n", remainBytes);
 //	}
@@ -823,10 +825,7 @@ void emit(signal_t signal, void* param, uint32_t argc){
 	if(signal == NULL || signal->slot == NULL) return;
 	UBaseType_t minNum = QUEUE_LEN+1;
 	vTaskSuspendAll();
-	
-	/*死亡回放(开发过程中遇到的一个bug)：曾经(2025/1/27)因为
-	  将sepT指针初始化为NULL，导致后续访问空指针致使系统卡死*/
-	signal_emit_param* sepT = &sep[0];
+	signal_emit_param* sepT = NULL;
 	if(param != NULL){
 		memcpy(signal->param, param, argc);
 	}
@@ -836,15 +835,18 @@ void emit(signal_t signal, void* param, uint32_t argc){
 			sepT = &sep[i];
 			minNum = sepT->waitingToDisposeNum;
 		}
-	}
-	sepT->waitingToDisposeNum = (sepT->waitingToDisposeNum + 1) > QUEUE_LEN ?\
-     QUEUE_LEN : (sepT->waitingToDisposeNum + 1);
+	}                       
 	if( xTaskResumeAll() == pdFALSE )
      portYIELD_WITHIN_API();
 	xReturn = xQueueSend(sepT->signal_queue, signal, 0);
-	if(xReturn == errQUEUE_FULL)
-		APP_KERNEL_LOG("app_kernel:警告：信号发送频率过高，可能丢失部分信号！\r\n");
-	xEventGroupSetBits(app_kernel.isSignalThreadBusy, sepT->EvenBit);
+	
+	if(xReturn == errQUEUE_FULL){
+		APP_KERNEL_LOG("app_kernel:警告：信号发送频率过高，将舍弃部分新发送的信号！\r\n");
+	  return ;
+	}else if(xReturn == pdPASS){
+		sepT->waitingToDisposeNum = uxQueueMessagesWaiting(sepT->signal_queue);
+		xEventGroupSetBits(app_kernel.isSignalThreadBusy, sepT->EvenBit);
+	}
 }
 
 /**************************************************************************
@@ -854,9 +856,10 @@ void emit(signal_t signal, void* param, uint32_t argc){
 **************************************************************************/
 void emit_FromISR(signal_t signal, void* param, uint32_t argc){
 	BaseType_t pxHigherPriorityTaskWoken;
+	BaseType_t xReturn = pdPASS;
 	if(signal == NULL || signal->slot == NULL) return;
-	UBaseType_t minNum = QUEUE_LEN+1;	
-	signal_emit_param* sepT = &sep[0];
+	UBaseType_t minNum = QUEUE_LEN+1;
+	signal_emit_param* sepT = NULL;
 	if(param != NULL){
 		memcpy(signal->param, param, argc);
 	}
@@ -866,14 +869,18 @@ void emit_FromISR(signal_t signal, void* param, uint32_t argc){
 			sepT = &sep[i];
 			minNum = sepT->waitingToDisposeNum;
 		}
-	}
-	sepT->waitingToDisposeNum = (sepT->waitingToDisposeNum + 1) > QUEUE_LEN ?\
-                           	QUEUE_LEN : (sepT->waitingToDisposeNum + 1);
-	xQueueSendFromISR(sepT->signal_queue, signal, 0);
+	}                       
+  xQueueSendFromISR(sepT->signal_queue, signal, 0);
 	portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
-	xEventGroupSetBitsFromISR(app_kernel.isSignalThreadBusy, sepT->EvenBit,\
+	
+	if(xReturn == errQUEUE_FULL){
+	  return ;
+	}else if(xReturn == pdPASS){
+		sepT->waitingToDisposeNum = uxQueueMessagesWaitingFromISR(sepT->signal_queue);
+		xEventGroupSetBitsFromISR(app_kernel.isSignalThreadBusy, sepT->EvenBit,\
       	&pxHigherPriorityTaskWoken);
-	portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
+	  portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
+	}
 }
 
 /**************************************************************************
@@ -904,7 +911,6 @@ void del_signal(signal_t signalToDel){
 /*time命令回调函数*/
 void time_testFunction(void* param,uint32_t argc){
 	APP_KERNEL_LOG("%s\r\n", (char*)param);
-	vTaskDelay(200);
 }
 
 /*call命令回调函数*/
